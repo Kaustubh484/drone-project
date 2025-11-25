@@ -54,23 +54,36 @@ class WaypointManager:
         return np.array(self.waypoints)
 
     def spawn_simple_static_path(self):
-        """Creates a very simple straight line path for initial training"""
+        """Level 1: Straight Line"""
         self.clear_waypoints()
-        # Start (near 0,0,0)
-        self.add_waypoint(0, 0, 1, color="green")
-        # Target 1 (Forward 2m)
-        self.add_waypoint(2, 0, 1, color="red")
-        # Target 2 (Forward 4m)
-        self.add_waypoint(4, 0, 1, color="blue")
+        self.add_waypoint(0, 0, 1, color="green") # Start
+        self.add_waypoint(2, 0, 1, color="red")   # Mid
+        self.add_waypoint(4, 0, 1, color="blue")  # End
         return self.get_waypoints()
 
     def spawn_default_path(self):
-        # Fallback to simple static for now
-        return self.spawn_simple_static_path()
+        """Level 2: Square Path (with altitude change)"""
+        self.clear_waypoints()
+        self.add_waypoint(0, 0, 1, color="green") # Start at 1m
+        self.add_waypoint(2, 0, 2, color="red")   # Forward & Up to 2m
+        self.add_waypoint(2, 2, 2, color="red")   # Left
+        self.add_waypoint(0, 2, 2, color="red")   # Back
+        self.add_waypoint(0, 0, 1, color="blue")  # Home & Down to 1m
+        return self.get_waypoints()
+    
+    def spawn_simple_path(self):
+        """Level 2: Square Path (with altitude change)"""
+        self.clear_waypoints()
+        self.add_waypoint(0, 0, 1, color="green") # Start at 1m
+        self.add_waypoint(2, 0, 1, color="red")   # Forward & Up to 2m
+        self.add_waypoint(2, 2, 1, color="red")   # Left
+        self.add_waypoint(0, 2, 1, color="red")   # Back
+        self.add_waypoint(0, 0, 1, color="blue")  # Home & Down to 1m
+        return self.get_waypoints()
 
     def generate_random_walk_path(self, num_waypoints=6, max_step_dist=5.0):
-        # Fallback to simple static for now to force learning
-        return self.spawn_simple_static_path()
+        # Fallback to square for now until we want Level 3
+        return self.spawn_default_path()
     
     def spawn_from_file(self, file_path):
         try:
@@ -81,4 +94,4 @@ class WaypointManager:
                 self.add_waypoint(wp[0], wp[1], wp[2], color=color)
             return self.get_waypoints()
         except Exception:
-            return self.spawn_simple_static_path()
+            return self.spawn_default_path()

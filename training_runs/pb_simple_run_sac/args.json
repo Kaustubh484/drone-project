@@ -12,5 +12,5 @@
     "control_mode": "velocity",
     "use_rotation_matrix": false,
     "save_interval": 100,
-    "resume": false
+    "resume": true
 }

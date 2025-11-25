@@ -14,9 +14,9 @@ from utils import initialize_agent
 def parse_args():
     parser = argparse.ArgumentParser(description="Train drone in PyBullet")
     
-    parser.add_argument("--run_tag", type=str, default="pb_simple_run")
+    parser.add_argument("--run_tag", type=str, default="pb_curriculum_run")
     parser.add_argument("--algo", type=str, default="ddpg", choices=["ddpg", "ppo", "sac"])
-    parser.add_argument("--episodes", type=int, default=5000)
+    parser.add_argument("--episodes", type=int, default=10000)
     parser.add_argument("--headless", action="store_true", help="Run without GUI (faster)")
     
     parser.add_argument("--actor_lr", type=float, default=1e-4)
@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--use_rotation_matrix", action="store_true")
     parser.add_argument("--save_interval", type=int, default=100)
     parser.add_argument("--resume", action="store_true", help="Load models and resume training")
+    parser.add_argument("--load_dir", type=str, default=None, help="Custom path to load models from")
     
     return parser.parse_args()
 
@@ -51,26 +52,34 @@ def run_episode(agent, env, args, wpm, episode_num=0):
     terminated, truncated = False, False
     history = []
     
+    # --- ACTION SMOOTHING ---
+    smooth_action = np.zeros(4)
+    alpha = 0.3 
+    # ------------------------
+    
     while not terminated and not truncated:
         if args.algo == "ppo":
             raw_action, log_prob, value = agent.get_action(state)
         else:
-            # Reduce noise over time could help, but constant is fine for SAC
             raw_action = agent.get_action(state, exploration_noise=0.1)
             
         low, high = env.action_space.low, env.action_space.high
-        action = low + (raw_action + 1.0) * 0.5 * (high - low)
+        target_action = low + (raw_action + 1.0) * 0.5 * (high - low)
         
-        next_state, reward, terminated, truncated, info = env.step(action)
+        # Smooth the action
+        smooth_action = (smooth_action * (1 - alpha)) + (target_action * alpha)
+        
+        next_state, reward, terminated, truncated, info = env.step(smooth_action)
         
         if env.current_step % 5 == 0:
-            step_data = [env.current_step, reward, *state, *action]
+            step_data = [env.current_step, reward, *state, *smooth_action]
             history.append(step_data)
 
         done_bool = float(terminated or truncated)
         if args.algo == "ppo":
             agent.store(state, raw_action, reward, done_bool, log_prob, value)
         else:
+            # Store RAW action for learning, but use SMOOTH action for env
             agent.remember(state, raw_action, reward, done_bool, next_state)
             agent.learn() 
 
@@ -106,14 +115,19 @@ def main():
 
     start_episode = 0
     if args.resume:
-        print(f"--- Resuming training from {save_dir} ---")
-        if os.path.exists(os.path.join(save_dir, "actor.pth")):
-            agent.load_models(save_dir)
-            existing_logs = [f for f in os.listdir(save_dir) if f.endswith("_log.csv")]
-            if existing_logs:
-                ep_nums = [int(f.split('_')[1]) for f in existing_logs]
-                start_episode = max(ep_nums) + 1
-            print(f"Resuming from Episode {start_episode}")
+        load_path = args.load_dir if args.load_dir else save_dir
+        print(f"--- Resuming training from {load_path} ---")
+        
+        if os.path.exists(os.path.join(load_path, "actor.pth")):
+            agent.load_models(load_path)
+            try:
+                existing_logs = [f for f in os.listdir(load_path) if f.endswith("_log.csv")]
+                if existing_logs:
+                    ep_nums = [int(f.split('_')[1]) for f in existing_logs]
+                    start_episode = max(ep_nums) + 1
+                print(f"Resuming from Episode {start_episode}")
+            except:
+                print("Could not determine start episode from logs, default to 0 (but models loaded)")
         else:
             print("No saved models found! Starting from scratch.")
 
@@ -123,8 +137,13 @@ def main():
     log_cols = get_log_columns(args.use_rotation_matrix, num_rays=36)
 
     for ep in tqdm(range(start_episode, args.episodes)):
-        # FIXED: Always use simple static path for now
-        waypoints = wpm.spawn_simple_static_path()
+        
+        # --- CURRICULUM ---
+        if ep < 1000:
+            waypoints = wpm.spawn_simple_static_path()
+        else:
+            waypoints = wpm.spawn_default_path()
+        # ------------------
             
         env = PyBulletDroneEnv(
             waypoints_list=waypoints,
